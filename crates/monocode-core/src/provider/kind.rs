@@ -12,9 +12,10 @@ pub enum Kind {
     Fx,
     Hermes,
     Devin,
+    Muse,
 }
 impl Kind {
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 12] = [
         Self::Claude,
         Self::Codex,
         Self::Cursor,
@@ -26,6 +27,7 @@ impl Kind {
         Self::Hermes,
         Self::Antigravity,
         Self::Devin,
+        Self::Muse,
     ];
     pub fn id(self) -> &'static str {
         match self {
@@ -40,6 +42,7 @@ impl Kind {
             Self::Fx => "fx",
             Self::Hermes => "hermes",
             Self::Devin => "devin",
+            Self::Muse => "muse",
         }
     }
     pub fn label(self) -> &'static str {
@@ -55,6 +58,7 @@ impl Kind {
             Self::Fx => "fx",
             Self::Hermes => "Hermes Agent",
             Self::Devin => "Devin",
+            Self::Muse => "Muse Code",
         }
     }
     pub fn parse(id: &str) -> Option<Self> {
@@ -106,6 +110,7 @@ impl Kind {
             Self::Fx => "fx CLI",
             Self::Hermes => "Hermes Agent CLI",
             Self::Devin => "Devin CLI",
+            Self::Muse => "Muse Code CLI",
         }
     }
     /// The install command React shows in its hint, when it has one.
@@ -122,6 +127,9 @@ impl Kind {
             Self::Devin => Some("irm https://static.devin.ai/cli/setup.ps1 | iex"),
             #[cfg(not(windows))]
             Self::Devin => Some("curl -fsSL https://cli.devin.ai/install.sh | bash"),
+            Self::Muse => {
+                Some("Install from https://dev.meta.ai/products/muse-code/, then run muse login")
+            }
             Self::Codex | Self::Claude | Self::Cursor | Self::OpenCode | Self::Antigravity => None,
         }
     }
@@ -144,11 +152,14 @@ impl Kind {
 mod tests {
     use super::*;
     #[test]
-    fn registry_matches_the_react_harnesses() {
+    fn registry_contains_legacy_harnesses_and_native_muse() {
         let source = include_str!("../../../../src/integrations/harness/core/register.ts");
         for kind in Kind::ALL {
             assert_eq!(Kind::parse(kind.id()), Some(kind));
-            assert!(source.contains(&format!("../providers/{}/", kind.id())));
+            // Muse is a native-only provider.
+            if kind != Kind::Muse {
+                assert!(source.contains(&format!("../providers/{}/", kind.id())));
+            }
         }
         assert_eq!(Kind::parse("unknown"), None);
         assert_eq!(Kind::Cursor.binary_name(), "cursor-agent");
@@ -171,7 +182,7 @@ mod tests {
     #[test]
     fn hints_match_the_react_source() {
         let source = include_str!("../../../../src/integrations/harness/core/availability.ts");
-        for kind in Kind::ALL {
+        for kind in Kind::ALL.into_iter().filter(|kind| *kind != Kind::Muse) {
             assert!(
                 source.contains(&format!("\"{}\"", kind.install_name())),
                 "React is missing the install name for {}",

@@ -11,6 +11,8 @@ uses React/Tauri. Native builds have their own Cargo workspace and lockfile.
   `pkg-config` on Debian/Ubuntu).
 - At least one installed, signed-in agent CLI. See [provider setup](../providers.md).
 
+The native app also supports [Muse Code](muse.md) through its official ACP CLI.
+
 The native commands do not require `npm install` or a frontend build.
 macOS is the primary preview target. A Linux ARM64 source build has been
 smoke-tested in a VM; Linux x64 packages and Windows GUI interaction still need

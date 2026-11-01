@@ -29,6 +29,7 @@ mod follow_up;
 mod kind;
 mod lifecycle;
 mod limits;
+pub(crate) mod muse;
 mod opencode;
 mod parked;
 mod pi;
@@ -1353,7 +1354,7 @@ fn run_process(
 }
 
 fn run_operation(
-    request: Request,
+    mut request: Request,
     cancel: Arc<AtomicBool>,
     controls: Option<mpsc::Receiver<Control>>,
     probe: bool,
@@ -1366,6 +1367,9 @@ fn run_operation(
     }
     if request.kind == Kind::OpenCode {
         return opencode::run(request, cancel, controls, probe, compact, emit);
+    }
+    if request.kind == Kind::Muse && !probe && !command_probe {
+        muse::prepare_effort(&mut request, &cancel)?;
     }
     let claude_new_session = (request.kind == Kind::Claude
         && request.provider_id.is_none()
@@ -1534,7 +1538,8 @@ fn run_operation(
     if cancel.load(Ordering::Relaxed) {
         return Err("Stopped".into());
     }
-    let eligible = !probe && !command_probe && !request.settings.text_only;
+    let eligible =
+        !probe && !command_probe && !request.settings.text_only && request.kind != Kind::Muse;
     let cached = eligible
         .then(|| parked::take(&parked::key(&request)))
         .flatten();

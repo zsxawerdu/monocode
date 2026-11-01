@@ -42,7 +42,18 @@ fn main() -> Result<(), String> {
                 prompt: prompt.into(),
                 provider_id: id.clone(),
                 model: std::env::var(format!("MONOCODE_{}_MODEL", kind.id().to_uppercase())).ok(),
-                settings: Default::default(),
+                settings: monocode_core::agent::Settings {
+                    effort: (if ix == 1 {
+                        std::env::var(format!("MONOCODE_{}_NEXT_EFFORT", kind.id().to_uppercase()))
+                            .ok()
+                    } else {
+                        None
+                    })
+                    .or_else(|| {
+                        std::env::var(format!("MONOCODE_{}_EFFORT", kind.id().to_uppercase())).ok()
+                    }),
+                    ..Default::default()
+                },
             },
             Arc::new(AtomicBool::new(false)),
             |events| {
