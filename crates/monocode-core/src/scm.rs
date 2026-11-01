@@ -130,6 +130,14 @@ const MAX_UNTRACKED_BYTES: u64 = 1024 * 1024;
 /// Uncommitted line counts: staged + unstaged vs HEAD, plus untracked
 /// (gitignore-aware) files counted as additions.
 pub fn diff_stats(cwd: &Path) -> Result<DiffStats, String> {
+    if crate::jj::is_workspace(cwd) {
+        let i = crate::jj::diff_index(cwd)?;
+        return Ok(DiffStats {
+            files: i.files.len() as i64,
+            additions: i.additions,
+            deletions: i.deletions,
+        });
+    }
     if remote_workspace::is_remote(cwd) {
         return remote_workspace::command("git_diff_stats", json!({"cwd":cwd}));
     }
@@ -139,6 +147,9 @@ pub fn diff_stats(cwd: &Path) -> Result<DiffStats, String> {
 /// Changed files under `cwd` (paths relative to it), with per-file line counts,
 /// status, and branch/upstream synchronization metadata.
 pub fn diff_index(cwd: &Path) -> Result<DiffIndex, String> {
+    if crate::jj::is_workspace(cwd) {
+        return crate::jj::diff_index(cwd);
+    }
     if remote_workspace::is_remote(cwd) {
         return remote_workspace::command("git_diff_index", json!({"cwd":cwd}));
     }
@@ -148,6 +159,9 @@ pub fn diff_index(cwd: &Path) -> Result<DiffIndex, String> {
 /// Recent commits for the Graph view: HEAD, upstream, and the default branch.
 /// Newest first, with parent SHAs for the graph.
 pub fn history(cwd: &Path, limit: Option<u32>) -> Result<History, String> {
+    if crate::jj::is_workspace(cwd) {
+        return crate::jj::history(cwd, limit);
+    }
     if remote_workspace::is_remote(cwd) {
         return remote_workspace::command("git_history", json!({"cwd":cwd,"limit":limit}));
     }
@@ -156,6 +170,7 @@ pub fn history(cwd: &Path, limit: Option<u32>) -> Result<History, String> {
 
 /// Stage a changed file or folder (`git add`).
 pub fn stage_file(cwd: &Path, relative: &str) -> Result<(), String> {
+    crate::jj::no_staging(cwd)?;
     if remote_workspace::is_remote(cwd) {
         return remote_workspace::command("git_stage_file", json!({"cwd":cwd,"relative":relative}));
     }
@@ -166,6 +181,7 @@ pub fn stage_file(cwd: &Path, relative: &str) -> Result<(), String> {
 
 /// Unstage a file or folder (`git restore --staged`).
 pub fn unstage_file(cwd: &Path, relative: &str) -> Result<(), String> {
+    crate::jj::no_staging(cwd)?;
     if remote_workspace::is_remote(cwd) {
         return remote_workspace::command(
             "git_unstage_file",
@@ -188,6 +204,10 @@ pub fn unstage_file(cwd: &Path, relative: &str) -> Result<(), String> {
 
 /// Discard unstaged changes so the file matches the index (or delete if untracked).
 pub fn discard_file(cwd: &Path, relative: &str) -> Result<(), String> {
+    if crate::jj::is_workspace(cwd) {
+        let relative = resolve_repo_path(cwd, relative)?;
+        return crate::jj::discard(cwd, Some(&relative));
+    }
     if remote_workspace::is_remote(cwd) {
         return remote_workspace::command(
             "git_discard_file",
@@ -199,6 +219,7 @@ pub fn discard_file(cwd: &Path, relative: &str) -> Result<(), String> {
 
 /// Stage every changed file in the repo.
 pub fn stage_all(cwd: &Path) -> Result<(), String> {
+    crate::jj::no_staging(cwd)?;
     if remote_workspace::is_remote(cwd) {
         return remote_workspace::command("git_stage_all", json!({"cwd":cwd}));
     }
@@ -207,6 +228,7 @@ pub fn stage_all(cwd: &Path) -> Result<(), String> {
 
 /// Unstage every staged file.
 pub fn unstage_all(cwd: &Path) -> Result<(), String> {
+    crate::jj::no_staging(cwd)?;
     if remote_workspace::is_remote(cwd) {
         return remote_workspace::command("git_unstage_all", json!({"cwd":cwd}));
     }
@@ -215,6 +237,9 @@ pub fn unstage_all(cwd: &Path) -> Result<(), String> {
 
 /// Discard every unstaged change (restore tracked files; delete untracked).
 pub fn discard_all(cwd: &Path) -> Result<(), String> {
+    if crate::jj::is_workspace(cwd) {
+        return crate::jj::discard(cwd, None);
+    }
     if remote_workspace::is_remote(cwd) {
         return remote_workspace::command("git_discard_all", json!({"cwd":cwd}));
     }
@@ -233,6 +258,9 @@ pub fn discard_all(cwd: &Path) -> Result<(), String> {
 
 /// Create a commit from the current index, or rewrite HEAD with it when `amend` is set.
 pub fn commit(cwd: &Path, message: &str, amend: bool) -> Result<(), String> {
+    if crate::jj::is_workspace(cwd) {
+        return crate::jj::commit(cwd, message, amend);
+    }
     if remote_workspace::is_remote(cwd) {
         return remote_workspace::command(
             "git_commit",
@@ -245,6 +273,9 @@ pub fn commit(cwd: &Path, message: &str, amend: bool) -> Result<(), String> {
 
 /// Full message (subject and body) of the commit at HEAD.
 pub fn head_message(cwd: &Path) -> Result<String, String> {
+    if crate::jj::is_workspace(cwd) {
+        return crate::jj::log_value(cwd, "@", "description");
+    }
     if remote_workspace::is_remote(cwd) {
         return remote_workspace::command("git_head_message", json!({"cwd":cwd}));
     }
@@ -254,6 +285,9 @@ pub fn head_message(cwd: &Path) -> Result<String, String> {
 
 /// Push the current branch to its upstream, or set upstream on first push.
 pub fn push(cwd: &Path) -> Result<(), String> {
+    if crate::jj::is_workspace(cwd) {
+        return crate::jj::push(cwd);
+    }
     if remote_workspace::is_remote(cwd) {
         return remote_workspace::command("git_push", json!({"cwd":cwd}));
     }
@@ -262,6 +296,9 @@ pub fn push(cwd: &Path) -> Result<(), String> {
 
 /// Fast-forward the current branch from its upstream.
 pub fn pull(cwd: &Path) -> Result<(), String> {
+    if crate::jj::is_workspace(cwd) {
+        return crate::jj::run(cwd, &["git", "fetch"]).map(|_| ());
+    }
     if remote_workspace::is_remote(cwd) {
         return remote_workspace::command("git_pull", json!({"cwd":cwd}));
     }
@@ -270,6 +307,10 @@ pub fn pull(cwd: &Path) -> Result<(), String> {
 
 /// Pull incoming commits, then push local commits.
 pub fn sync(cwd: &Path) -> Result<(), String> {
+    if crate::jj::is_workspace(cwd) {
+        crate::jj::run(cwd, &["git", "fetch"])?;
+        return crate::jj::push(cwd);
+    }
     if remote_workspace::is_remote(cwd) {
         return remote_workspace::command("git_sync", json!({"cwd":cwd}));
     }
@@ -283,6 +324,13 @@ pub fn sync(cwd: &Path) -> Result<(), String> {
 
 /// Staged diff (or unstaged vs HEAD if nothing is staged) for commit text generation.
 pub fn staged_context(cwd: &Path) -> Result<StagedContext, String> {
+    if crate::jj::is_workspace(cwd) {
+        return Ok(StagedContext {
+            branch: crate::jj::diff_index(cwd)?.branch,
+            summary: crate::jj::run(cwd, &["diff", "--stat"])?,
+            patch: crate::jj::run(cwd, &["diff", "--git"])?,
+        });
+    }
     if remote_workspace::is_remote(cwd) {
         return remote_workspace::command("git_staged_context", json!({"cwd":cwd}));
     }
@@ -1354,6 +1402,9 @@ fn git_ahead_behind(root: &Path, base: &str) -> (i64, i64) {
 /// The checkout's Git directory and, for a linked worktree, the shared one:
 /// where HEAD, the index and refs live, for change watchers.
 pub fn git_dirs(root: &Path) -> Vec<std::path::PathBuf> {
+    if let Some(root) = crate::jj::root(root) {
+        return vec![root.join(".jj/working_copy")];
+    }
     let Some(text) = git_stdout(
         root,
         &[

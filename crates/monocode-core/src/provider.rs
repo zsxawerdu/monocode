@@ -1393,6 +1393,7 @@ fn run_operation(
     match request.kind {
         Kind::Codex => {
             command.arg("app-server");
+            crate::codemode::configure_codex(&mut command, &request);
             crate::visual_bridge::configure_codex(&mut command, &request.settings.environment);
             if let Some(mono) = &request.settings.mono {
                 if let Some(home) =
@@ -1444,11 +1445,20 @@ fn run_operation(
                 command.args(["--tools", "Read,Glob,Grep,Bash"]);
                 allowed.push("Read,Glob,Grep,Bash(git status *),Bash(git diff *),Bash(git log *),Bash(git show *),Bash(pwd),Bash(ls *),Bash(rg *)");
             }
-            if let Some(server) = visual_server {
+            let mut mcp_servers = serde_json::Map::new();
+            if let Some(server) = crate::codemode::mcp_server(&request) {
+                mcp_servers.insert("monocode_codemode".into(), server);
+            }
+            if let Some(server) = &visual_server {
+                mcp_servers.insert("monocode_visual".into(), server.clone());
+            }
+            if !mcp_servers.is_empty() {
                 command.args([
                     "--mcp-config",
-                    &json!({"mcpServers":{"monocode_visual":server}}).to_string(),
+                    &json!({"mcpServers":mcp_servers}).to_string(),
                 ]);
+            }
+            if visual_server.is_some() {
                 allowed.push(crate::visual_bridge::CLAUDE_ALLOWED_TOOLS);
                 if let Some(instructions) =
                     crate::visual_bridge::instructions(&settings.environment, true)

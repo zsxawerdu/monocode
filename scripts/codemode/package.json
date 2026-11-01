@@ -1,0 +1,12 @@
+{
+  "name": "monocode-codemode",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22.19.0" },
+  "scripts": { "test": "node --test server.test.mjs" },
+  "dependencies": {
+    "@earendil-works/pi-codemode": "1.4.0",
+    "@modelcontextprotocol/sdk": "1.32.2"
+  }
+}

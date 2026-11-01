@@ -27,6 +27,9 @@ pub struct FileDiff {
 
 /// Changed files and counts, without the branch and upstream reads.
 pub fn diff_files(cwd: &Path) -> Result<DiffIndex, String> {
+    if crate::jj::is_workspace(cwd) {
+        return crate::jj::diff_index(cwd);
+    }
     if remote_workspace::is_remote(cwd) {
         return remote_workspace::command("git_diff_files", json!({"cwd":cwd}));
     }
@@ -36,6 +39,9 @@ pub fn diff_files(cwd: &Path) -> Result<DiffIndex, String> {
 /// Revalidate the review's file list without computing every file's line
 /// counts or querying remotes. Loaded diffs supply their own exact counts.
 pub fn review_index(cwd: &Path, previous: Option<&DiffIndex>) -> Result<DiffIndex, String> {
+    if crate::jj::is_workspace(cwd) {
+        return crate::jj::diff_index(cwd);
+    }
     if remote_workspace::is_remote(cwd) {
         return diff_files(cwd);
     }
@@ -121,7 +127,7 @@ pub fn file_diff_versions(
     cwd: &Path,
     snapshot: &DiffIndex,
 ) -> Result<HashMap<String, FileDiffVersion>, String> {
-    if remote_workspace::is_remote(cwd) {
+    if remote_workspace::is_remote(cwd) || crate::jj::is_workspace(cwd) {
         // The host exposes no index object IDs. Fingerprint the bounded diff
         // contents so equal line counts cannot hide an external host edit.
         use sha2::{Digest, Sha256};
@@ -207,6 +213,24 @@ pub fn file_diff_versions(
 /// One file's index or HEAD side against its other side. `staged` compares
 /// HEAD with the index; otherwise the index with the working tree.
 pub fn file_diff(cwd: &Path, relative: &str, staged: bool) -> Result<FileDiff, String> {
+    if crate::jj::is_workspace(cwd) {
+        let relative = resolve_repo_path(cwd, relative)?;
+        let original = crate::jj::file(cwd, "@-", &relative)?;
+        let current = crate::jj::file(cwd, "@", &relative)?;
+        let status = crate::jj::diff_index(cwd)?
+            .files
+            .into_iter()
+            .find(|f| f.relative == relative)
+            .map(|f| f.status)
+            .unwrap_or_else(|| "modified".into());
+        return Ok(text_diff(
+            path_to_js(&cwd.join(&relative)),
+            relative,
+            &status,
+            original,
+            current,
+        ));
+    }
     if remote_workspace::is_remote(cwd) {
         return remote_workspace::command(
             "git_file_diff",
@@ -247,6 +271,9 @@ pub fn file_diff(cwd: &Path, relative: &str, staged: bool) -> Result<FileDiff, S
 
 /// The files a commit changed, against its first parent (or nothing).
 pub fn commit_files(cwd: &Path, sha: &str) -> Result<Vec<ChangedFile>, String> {
+    if crate::jj::is_workspace(cwd) {
+        return crate::jj::revision_index(cwd, sha).map(|i| i.files);
+    }
     if remote_workspace::is_remote(cwd) {
         return remote_workspace::command("git_commit_files", json!({"cwd":cwd,"sha":sha}));
     }
@@ -305,6 +332,18 @@ pub fn commit_files(cwd: &Path, sha: &str) -> Result<Vec<ChangedFile>, String> {
 
 /// One file in a commit against its first parent.
 pub fn commit_file_diff(cwd: &Path, sha: &str, relative: &str) -> Result<FileDiff, String> {
+    if crate::jj::is_workspace(cwd) {
+        let relative = resolve_repo_path(cwd, relative)?;
+        let original = crate::jj::file(cwd, &format!("({sha})-"), &relative)?;
+        let current = crate::jj::file(cwd, sha, &relative)?;
+        return Ok(text_diff(
+            path_to_js(&cwd.join(&relative)),
+            relative,
+            "modified",
+            original,
+            current,
+        ));
+    }
     if remote_workspace::is_remote(cwd) {
         return remote_workspace::command(
             "git_commit_file_diff",
@@ -341,6 +380,7 @@ pub fn commit_file_diff(cwd: &Path, sha: &str, relative: &str) -> Result<FileDif
 /// Writes `contents` as the file's index entry, keeping its mode: stages a
 /// single hunk without touching the working tree.
 pub fn stage_contents(cwd: &Path, relative: &str, contents: &[u8]) -> Result<(), String> {
+    crate::jj::no_staging(cwd)?;
     if remote_workspace::is_remote(cwd) {
         let contents = std::str::from_utf8(contents).map_err(|_| "File is not valid UTF-8.")?;
         return remote_workspace::command(

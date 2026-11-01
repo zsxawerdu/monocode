@@ -124,6 +124,12 @@ impl Conversation {
         self.attach_account(cx);
         let mut settings = self.settings.clone();
         settings.environment.extend(self.app_environment.clone());
+        settings.shared_codemode = cx
+            .try_global::<crate::settings::Preferences>()
+            .is_some_and(|p| p.shared_codemode);
+        settings.pi_codemode = cx
+            .try_global::<crate::settings::Preferences>()
+            .is_some_and(|p| p.pi_codemode);
         settings.disable_claude_hooks = cx
             .try_global::<crate::settings::Preferences>()
             .is_some_and(|preferences| !preferences.claude_hooks);

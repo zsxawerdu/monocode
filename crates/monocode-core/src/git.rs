@@ -70,6 +70,22 @@ pub fn uncommitted(cwd: &Path, paths: &[String]) -> bool {
 }
 /// Which of `paths`' uncommitted changes are staged, as `uncommitted` reads them.
 pub fn session_changes(cwd: &Path, paths: &[String]) -> SessionChanges {
+    if crate::jj::is_workspace(cwd) {
+        let changed = crate::jj::diff_index(cwd)
+            .map(|i| {
+                i.files.iter().any(|f| {
+                    paths.iter().any(|p| {
+                        crate::files::document::resolve_path(Path::new(p), cwd)
+                            == PathBuf::from(&f.path)
+                    })
+                })
+            })
+            .unwrap_or(false);
+        return SessionChanges {
+            staged: changed,
+            unstaged: false,
+        };
+    }
     let mut changes = SessionChanges::default();
     if paths.is_empty() {
         return changes;
@@ -121,6 +137,17 @@ pub fn session_changes(cwd: &Path, paths: &[String]) -> SessionChanges {
 }
 /// `commit` is on the current branch but on no remote-tracking branch yet.
 pub fn unpushed(cwd: &Path, commit: &str) -> bool {
+    if crate::jj::is_workspace(cwd) {
+        if commit.is_empty() || !commit.chars().all(|c| c.is_ascii_hexdigit()) {
+            return false;
+        }
+        return crate::jj::log_value(
+            cwd,
+            &format!("{commit} ~ ::remote_bookmarks()"),
+            "commit_id",
+        )
+        .is_ok_and(|s| !s.trim().is_empty());
+    }
     if commit.is_empty() || commit.starts_with('-') {
         return false;
     }
@@ -176,6 +203,9 @@ pub fn commit_files(cwd: &Path, commit: &str) -> Result<Vec<CommitFile>, String>
         .collect())
 }
 pub fn snapshot(cwd: &Path) -> Result<Snapshot, String> {
+    if crate::jj::is_workspace(cwd) {
+        return crate::jj::snapshot(cwd);
+    }
     if crate::files::remote::is_remote(cwd) {
         return remote::snapshot(cwd);
     }
@@ -232,6 +262,9 @@ pub fn snapshot(cwd: &Path) -> Result<Snapshot, String> {
 
 /// Listing working copies does not require reading every local/remote branch.
 pub fn worktrees(cwd: &Path) -> Result<Vec<Worktree>, String> {
+    if crate::jj::is_workspace(cwd) {
+        return crate::jj::workspaces(cwd);
+    }
     if crate::files::remote::is_remote(cwd) {
         return remote::worktrees(cwd);
     }
@@ -261,6 +294,9 @@ fn valid_branch(cwd: &Path, name: &str) -> Result<(), String> {
     git(cwd, &["check-ref-format", "--branch", name]).map(|_| ())
 }
 pub fn checkout(cwd: &Path, branch: &Branch) -> Result<(), String> {
+    if crate::jj::is_workspace(cwd) {
+        return crate::jj::run(cwd, &["new", "--", &branch.name]).map(|_| ());
+    }
     if crate::files::remote::is_remote(cwd) {
         return remote::checkout(cwd, branch);
     }
@@ -277,6 +313,9 @@ pub fn checkout(cwd: &Path, branch: &Branch) -> Result<(), String> {
     Ok(())
 }
 pub fn create_branch(cwd: &Path, name: &str) -> Result<(), String> {
+    if crate::jj::is_workspace(cwd) {
+        return crate::jj::run(cwd, &["bookmark", "create", "--", name]).map(|_| ());
+    }
     if crate::files::remote::is_remote(cwd) {
         return remote::create_branch(cwd, name);
     }
@@ -285,6 +324,10 @@ pub fn create_branch(cwd: &Path, name: &str) -> Result<(), String> {
     Ok(())
 }
 pub fn create_worktree(cwd: &Path, base: &str, session: i64) -> Result<PathBuf, String> {
+    if crate::jj::is_workspace(cwd) {
+        return crate::jj::create_workspace(cwd, &format!("mc-{session}"), Some(base))
+            .map(|w| PathBuf::from(w.path));
+    }
     if crate::files::remote::is_remote(cwd) {
         let stamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -349,6 +392,13 @@ pub fn create_project_worktree(
     base: Option<&str>,
     existing: bool,
 ) -> Result<Worktree, String> {
+    if crate::jj::is_workspace(cwd) {
+        return crate::jj::create_workspace(
+            cwd,
+            branch.trim(),
+            if existing { Some(branch.trim()) } else { base },
+        );
+    }
     if crate::files::remote::is_remote(cwd) {
         return remote::create_worktree(cwd, branch.trim(), base, existing);
     }
