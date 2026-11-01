@@ -41,7 +41,7 @@ pub fn native_prompt(kind: Kind, text: &str) -> String {
     text.into()
 }
 
-/// OMP and Devin own slash arguments, including @file-like text. Expanding a
+/// OMP, Devin and Muse own slash arguments, including @file-like text. Expanding a
 /// local skill or mention ahead of them would turn a command into normal text.
 pub fn prepare_prompt(
     kind: Kind,
@@ -50,7 +50,7 @@ pub fn prepare_prompt(
     attachments: &[PathBuf],
 ) -> Result<String, String> {
     let text = native_prompt(kind, text);
-    if matches!(kind, Kind::Omp | Kind::Devin) && text.trim_start().starts_with('/') {
+    if matches!(kind, Kind::Omp | Kind::Devin | Kind::Muse) && text.trim_start().starts_with('/') {
         crate::composer::validate_attachments(attachments)?;
         return Ok(text);
     }
@@ -132,6 +132,7 @@ pub fn supports_compact(kind: Kind) -> bool {
             | Kind::Omp
             | Kind::Grok
             | Kind::Devin
+            | Kind::Muse
             | Kind::OpenCode
     )
 }

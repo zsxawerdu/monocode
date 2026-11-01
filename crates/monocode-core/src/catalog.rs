@@ -274,7 +274,9 @@ pub fn models_for(kind: Kind, account: &crate::accounts::Profile) -> Result<Vec<
         .copied()
         .unwrap_or(0);
     drop(guard);
-    let value = if kind == Kind::Fx {
+    let value = if kind == Kind::Muse {
+        provider::muse::catalog(account)?
+    } else if kind == Kind::Fx {
         cli_json(kind, &["models", "--json"])?
     } else if kind.is_acp() || kind.is_pi() {
         provider::catalog_for(kind, account.clone())?
@@ -290,6 +292,8 @@ pub fn models_for(kind: Kind, account: &crate::accounts::Profile) -> Result<Vec<
         fx_models(&value)
     } else if kind == Kind::Devin {
         provider::devin::catalog_models(&value)
+    } else if kind == Kind::Muse {
+        muse_models(&value)
     } else if kind.is_acp() {
         acp_models(&value)
     } else if kind.is_pi() {
@@ -416,6 +420,31 @@ fn leaves<'a>(values: &'a Value, out: &mut Vec<&'a Value>) {
         }
     }
 }
+fn muse_models(value: &Value) -> Vec<Model> {
+    value["models"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|row| {
+            let id = row["modelId"].as_str()?;
+            let mut model = model(id, row["displayLabel"].as_str().unwrap_or(id));
+            // `variants` is complete; reasoningEffortVariants contains only described tiers.
+            model.efforts = row["variants"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|value| value.as_str().map(str::to_owned))
+                .collect();
+            model.default_effort = row["defaultReasoningEffort"]
+                .as_str()
+                .filter(|value| model.efforts.iter().any(|effort| effort == value))
+                .map(str::to_owned);
+            model.default = row["isDefault"] == true;
+            Some(model)
+        })
+        .collect()
+}
+
 fn acp_models(value: &Value) -> Vec<Model> {
     let configs: Vec<_> = value["configOptions"]
         .as_array()
@@ -882,6 +911,20 @@ fn query_provider(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn muse_uses_all_variants_not_only_described_tiers() {
+        let rows = muse_models(&json!({"models":[
+            {"modelId":"wonder", "isDefault":true, "variants":["minimal","low","medium","high","xhigh","max"],"reasoningEffortVariants":[],"defaultReasoningEffort":"high"},
+            {"modelId":"spark", "variants":["low","high","xhigh"],"reasoningEffortVariants":[{"tier":"xhigh","description":"Deep"}],"defaultReasoningEffort":"high"},
+            {"modelId":"unknown", "variants":{"kind":"unknown"}}
+        ]}));
+        assert_eq!(rows[0].efforts.len(), 6);
+        assert_eq!(rows[0].default_effort.as_deref(), Some("high"));
+        assert!(rows[0].default);
+        assert_eq!(rows[1].efforts, vec!["low", "high", "xhigh"]);
+        assert!(rows[2].efforts.is_empty());
+    }
 
     #[test]
     fn cached_catalogs_are_account_scoped_and_invalidated_together() {

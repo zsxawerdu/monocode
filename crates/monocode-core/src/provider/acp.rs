@@ -1,4 +1,4 @@
-//! ACP lifecycle shared by Cursor, Grok, OpenCode, Antigravity, fx, Hermes and Devin.
+//! ACP lifecycle shared by Cursor, Grok, OpenCode, Antigravity, fx, Hermes, Devin and Muse.
 //! Mirrors the ACP adapters in src/integrations/harness/providers. Providers own
 //! filesystem/terminal access; we never claim client capabilities we cannot serve.
 use super::*;
@@ -79,6 +79,19 @@ pub(super) fn configure(command: &mut Command, request: &Request) -> Result<(), 
                 command.args(super::devin::supervised_args()?);
             }
             command.arg("acp");
+        }
+        Kind::Muse => {
+            command.arg("acp").env("MUSE_EXPERIMENTAL_ACP", "on");
+            // Disable writes and shell execution for background text and discovery.
+            if settings.text_only || settings.plan || settings.access == AccessMode::ReadOnly {
+                command.args([
+                    "--disable-write",
+                    "--disable-shell",
+                    "--disable-request-user-input",
+                ]);
+            } else {
+                command.arg("--trust-workspace");
+            }
         }
         Kind::Cursor => {
             command.arg("acp");
@@ -198,7 +211,7 @@ impl Protocol {
             match (self.request.kind, stage) {
                 (Kind::Devin, Stage::ThoughtProbe) => Some(5),
                 (Kind::Cursor | Kind::Grok | Kind::Antigravity, _) => Some(12),
-                (Kind::Hermes, _) => Some(20),
+                (Kind::Hermes | Kind::Muse, _) => Some(20),
                 (Kind::Devin, _) => Some(30),
                 _ => None,
             }
@@ -206,7 +219,7 @@ impl Protocol {
             match (self.request.kind, stage) {
                 (Kind::Cursor, _) => None,
                 (Kind::Grok | Kind::Fx | Kind::Antigravity, Stage::Initialize) => Some(12),
-                (Kind::Hermes | Kind::Devin, Stage::Initialize) => Some(20),
+                (Kind::Hermes | Kind::Devin | Kind::Muse, Stage::Initialize) => Some(20),
                 (Kind::Grok, Stage::Authenticate) => Some(15),
                 (Kind::Devin, Stage::Authenticate) => {
                     Some(if params["_meta"]["api_key"].is_string() {
@@ -218,7 +231,7 @@ impl Protocol {
                 (Kind::Devin, Stage::New) if self.probe => Some(30),
                 (_, Stage::New | Stage::Load | Stage::Resume) => Some(45),
                 (Kind::Grok | Kind::Fx | Kind::Antigravity, Stage::Configure) => Some(15),
-                (Kind::Hermes | Kind::Devin, Stage::Configure) => Some(20),
+                (Kind::Hermes | Kind::Devin | Kind::Muse, Stage::Configure) => Some(20),
                 (_, Stage::Prompt) => Some(30 * 60),
                 (Kind::Devin, Stage::ThoughtProbe) => Some(5),
                 (Kind::Devin, Stage::DeleteProbe) => Some(30),
@@ -330,7 +343,19 @@ impl Protocol {
         let kind = self.request.kind;
         let settings = &self.request.settings;
         let planning = settings.plan || settings.access == AccessMode::ReadOnly;
+        if kind == Kind::Muse && planning && !self.probe && !settings.text_only {
+            return Err("Muse Code does not support read-only or plan mode. Select Supervised to use Muse with approval prompts.".into());
+        }
         let mode = match kind {
+            Kind::Muse => {
+                if settings.text_only || self.probe {
+                    "denyUnmatched"
+                } else if settings.access == AccessMode::FullAccess {
+                    "allowAll"
+                } else {
+                    "promptUnmatched"
+                }
+            }
             Kind::Antigravity => {
                 if planning {
                     "default"
@@ -388,7 +413,7 @@ impl Protocol {
             && (modes.is_some_and(|modes| modes.iter().any(|m| m["id"] == mode))
                 || matches!(
                     kind,
-                    Kind::Antigravity | Kind::Hermes | Kind::Devin | Kind::Fx
+                    Kind::Antigravity | Kind::Hermes | Kind::Devin | Kind::Fx | Kind::Muse
                 ))
         {
             self.acp.mode = Some(mode);
@@ -473,6 +498,15 @@ impl Protocol {
             selected
                 .entry("thinking".into())
                 .or_insert_with(|| thinking.to_string());
+        }
+        if kind == Kind::Muse {
+            // Applied durably over MSP before opening ACP; its effort options are incomplete.
+            selected.retain(|id, _| {
+                !matches!(
+                    id.as_str(),
+                    "effort" | "reasoning" | "reasoning_effort" | "thought_level"
+                )
+            });
         }
         if kind == Kind::Hermes {
             selected.retain(|id, _| id == "effort");
@@ -621,6 +655,11 @@ impl Protocol {
             }
             _ => {}
         }
+        if kind == Kind::Muse && detail.to_lowercase().contains("log in to muse") {
+            return Err(
+                "Muse Code: run `muse login` in a terminal, finish signing in, then retry.".into(),
+            );
+        }
         // A JSON-RPC failure is not evidence that the user needs to log in.
         Err(format!("{}: {detail}", kind.label()))
     }
@@ -697,7 +736,8 @@ impl Protocol {
                         || access == AccessMode::FullAccess
                         || (access == AccessMode::Auto
                             && self.request.kind != Kind::Antigravity
-                            && self.request.kind != Kind::Devin)
+                            && self.request.kind != Kind::Devin
+                            && self.request.kind != Kind::Muse)
                         || (access == AccessMode::AutoAcceptEdits
                             && if self.request.kind == Kind::Antigravity {
                                 kind == Some("edit")
@@ -1463,6 +1503,88 @@ mod tests {
             assert!(p.done);
         }
     }
+    #[test]
+    fn muse_launch_and_permissions_follow_its_acp_contract() {
+        let mut p = protocol(Kind::Muse);
+        let mut command = Command::new("muse");
+        configure(&mut command, &p.request).unwrap();
+        assert_eq!(
+            command.get_args().collect::<Vec<_>>(),
+            ["acp", "--trust-workspace"]
+        );
+        assert!(command
+            .get_envs()
+            .any(|(key, value)| key == "MUSE_EXPERIMENTAL_ACP"
+                && value == Some(std::ffi::OsStr::new("on"))));
+        for (access, mode) in [
+            (AccessMode::Supervised, "promptUnmatched"),
+            (AccessMode::AutoAcceptEdits, "promptUnmatched"),
+            (AccessMode::Auto, "promptUnmatched"),
+            (AccessMode::FullAccess, "allowAll"),
+        ] {
+            p.request.settings.access = access;
+            p.acp_options(&json!({})).unwrap();
+            assert_eq!(p.acp.mode, Some(mode));
+        }
+        p.request.settings.access = AccessMode::ReadOnly;
+        assert!(p
+            .acp_options(&json!({}))
+            .unwrap_err()
+            .contains("does not support"));
+        p.request.settings.access = AccessMode::Supervised;
+        p.request.settings.plan = true;
+        assert!(p.acp_options(&json!({})).is_err());
+        p.request.settings.text_only = true;
+        p.acp_options(&json!({})).unwrap();
+        assert_eq!(p.acp.mode, Some("denyUnmatched"));
+        let mut command = Command::new("muse");
+        configure(&mut command, &p.request).unwrap();
+        let args = command.get_args().collect::<Vec<_>>();
+        assert!(args.contains(&std::ffi::OsStr::new("--disable-write")));
+        assert!(args.contains(&std::ffi::OsStr::new("--disable-shell")));
+        assert!(!args.contains(&std::ffi::OsStr::new("--trust-workspace")));
+    }
+
+    #[test]
+    fn muse_auto_keeps_command_approval_and_resume_errors() {
+        let mut p = protocol(Kind::Muse);
+        p.request.settings.access = AccessMode::Auto;
+        p.acp.stage = Stage::Prompt;
+        p.acp.session = "s".into();
+        let mut out = Vec::new();
+        let events = p.frame(json!({"id":99,"method":"session/request_permission","params":{"sessionId":"s","toolCall":{"toolCallId":"t","kind":"execute","title":"Run command"},"options":[{"kind":"allow_once","optionId":"yes"},{"kind":"reject_once","optionId":"no"}]}}), &mut out).unwrap();
+        assert!(matches!(events.as_slice(), [Event::Approval(_)]));
+        assert!(out.is_empty());
+        p.respond(
+            Control {
+                id: "99".into(),
+                decision: Decision::Deny,
+            },
+            &mut out,
+        )
+        .unwrap();
+        assert_eq!(last(&mut out)["result"]["outcome"]["optionId"], "no");
+        p.acp.stage = Stage::Load;
+        assert!(p
+            .acp_failure(
+                &json!({"message":"session is already in use"}),
+                false,
+                &mut out
+            )
+            .unwrap_err()
+            .contains("already in use"));
+        assert!(out.is_empty());
+        p.acp.stage = Stage::New;
+        assert!(p
+            .acp_failure(
+                &json!({"message":"log in to Muse before opening a session"}),
+                false,
+                &mut out
+            )
+            .unwrap_err()
+            .contains("muse login"));
+    }
+
     #[test]
     fn hermes_sends_only_an_advertised_reasoning_effort() {
         let mut p = protocol(Kind::Hermes);

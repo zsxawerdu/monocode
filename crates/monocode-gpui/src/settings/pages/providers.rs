@@ -261,6 +261,9 @@ impl SettingsView {
             }
             let description = installed
                 .map(|_| {
+                    if kind == Kind::Muse {
+                        return "Uses your Muse CLI login (`muse login`). Read-only and Plan are unavailable; Auto asks before unmatched commands.".into();
+                    }
                     format!(
                         "{} {} available.",
                         models.len(),
