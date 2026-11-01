@@ -1145,6 +1145,12 @@ impl Conversation {
                 settings.prepared_prompt = Some(prepared);
             }
         }
+        settings.shared_codemode = cx
+            .try_global::<crate::settings::Preferences>()
+            .is_some_and(|p| p.shared_codemode);
+        settings.pi_codemode = cx
+            .try_global::<crate::settings::Preferences>()
+            .is_some_and(|p| p.pi_codemode);
         settings.disable_claude_hooks = cx
             .try_global::<crate::settings::Preferences>()
             .is_some_and(|p| !p.claude_hooks);

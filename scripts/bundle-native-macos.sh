@@ -37,6 +37,16 @@ cp src-tauri/icons/icon.icns "$native_bundle/Contents/Resources/monocode.icns"
 cp src-tauri/macos/Assets.car "$native_bundle/Contents/Resources/Assets.car"
 # Ship the app's attribution and the license texts for GPUI and embedded assets.
 # Add these before signing so the signature covers the notices too.
+native_codemode="$native_bundle/Contents/Resources/codemode"
+if [ ! -f scripts/codemode/node_modules/@earendil-works/pi-codemode/package.json ]; then
+  echo 'Missing codemode dependencies; run npm run native:build.' >&2
+  exit 1
+fi
+mkdir -p "$native_codemode"
+cp scripts/codemode/server.mjs scripts/codemode/package.json scripts/codemode/package-lock.json "$native_codemode/"
+# Copy installed, pinned packages including the WASM runtime and worker files.
+rm -rf "$native_codemode/node_modules"
+cp -R scripts/codemode/node_modules "$native_codemode/node_modules"
 native_licenses="$native_bundle/Contents/Resources/licenses"
 mkdir -p "$native_licenses"
 cp LICENSE NOTICE docs/native/LICENSE-GPUI-APACHE docs/native/LICENSE-MERMAID-MIT "$native_licenses/"

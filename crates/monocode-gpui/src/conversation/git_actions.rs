@@ -94,6 +94,21 @@ impl GitAction {
         }
     }
     /// What the agent receives instead.
+    fn jj_prompt(self) -> String {
+        let task = match self {
+            Self::Stage => "Inspect your changes with jj; there is no staging area. Do not commit.",
+            Self::Commit => "Commit only your changes from this session with jj.",
+            Self::CommitPush => {
+                "Commit only your changes from this session with jj, then push the intended bookmark with jj git push."
+            }
+            Self::Push => {
+                "Push this session's intended bookmark with jj git push. Do not commit or change other revisions or bookmarks."
+            }
+        };
+        format!(
+            "{task}\n\nUse jj status, jj diff, and jj log to identify the working-copy change and your own edits. Never use Git mutation commands in this jj workspace. Name paths explicitly when committing a subset. If a file mixes your changes with someone else's and you cannot safely separate them, leave it out and explain why. Preserve unrelated changes and existing descriptions. Do not abandon, restore, rewrite unrelated revisions, or move unrelated bookmarks. Before pushing, identify the intended bookmark and target; if ambiguous, ask. If rejected, stop and report it. Finish with the change ID, description, included paths, and push destination if applicable."
+        )
+    }
     pub(crate) fn prompt(self) -> String {
         if self == Self::Push {
             return "Push the current branch with git.\n\nDo not stage, commit, amend or change anything else. Use `git push`, or `git push -u origin <branch>` when the branch has no upstream. Never force-push. If the push is rejected, stop and report it; do not pull, rebase or merge.\n\nFinish with a short reply saying where it was pushed.".into();
@@ -329,7 +344,13 @@ impl Conversation {
             cx.set_global(LastGitAction(action));
         }
         let mut message = self.message(action.message().to_owned(), Vec::new(), None, cx);
-        message.prepared_prompt = Some(action.prompt());
+        message.prepared_prompt = Some(
+            if monocode_core::jj::is_workspace(Path::new(self.execution_cwd())) {
+                action.jj_prompt()
+            } else {
+                action.prompt()
+            },
+        );
         self.launch_message(message, cx);
         cx.notify();
     }

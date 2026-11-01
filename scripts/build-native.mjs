@@ -1,3 +1,4 @@
+import { cpSync, mkdirSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -23,6 +24,8 @@ function run(command, args, capture = false) {
   return result.stdout;
 }
 
+run("npm", ["ci", "--prefix", "scripts/codemode", "--omit=dev", "--ignore-scripts", "--no-audit", "--no-fund"]);
+
 const metadata = JSON.parse(
   run("cargo", ["metadata", "--manifest-path", "crates/monocode-gpui/Cargo.toml", "--locked", "--no-deps", "--format-version", "1"], true),
 );
@@ -36,6 +39,8 @@ const target = process.env.CARGO_BUILD_TARGET
 if (process.platform === "darwin") {
   run("bash", ["scripts/bundle-native-macos.sh", "release", target, app.version, "monocode-data"]);
 } else {
+  mkdirSync(join(target, "release", "codemode"), { recursive: true });
+  cpSync(join(root, "scripts/codemode"), join(target, "release", "codemode"), { recursive: true });
   const executable = process.platform === "win32" ? "monocode-gpui.exe" : "monocode-gpui";
   console.log(`Executable: ${join(target, "release", executable)}`);
 }

@@ -1416,6 +1416,7 @@ fn run_operation(
     match request.kind {
         Kind::Codex => {
             command.arg("app-server");
+            crate::codemode::configure_codex(&mut command, &request);
             crate::visual_bridge::configure_codex(&mut command, &request.settings.environment);
             crate::mono::bridge::configure_codex(
                 &mut command,
@@ -1478,6 +1479,9 @@ fn run_operation(
                 })
                 .flatten();
             let mut servers = serde_json::Map::new();
+            if let Some(server) = crate::codemode::mcp_server(&request) {
+                servers.insert("monocode_codemode".into(), server);
+            }
             if let Some(server) = app_server {
                 servers.insert(crate::mono::bridge::MCP_SERVER.into(), server);
                 allowed.push(crate::mono::bridge::CLAUDE_ALLOWED_TOOLS);

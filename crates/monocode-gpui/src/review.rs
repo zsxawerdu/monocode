@@ -1214,7 +1214,7 @@ impl ReviewPane {
         };
         let models: Vec<DiffFile> = match &source.tab {
             ReviewTab::File { .. } => return,
-            ReviewTab::Changes { staged, .. } => entries(files, *staged)
+            ReviewTab::Changes { staged, cwd, .. } => entries(files, *staged)
                 .into_iter()
                 .map(|(id, kind, file)| {
                     let loaded = source.loaded.get(&id);
@@ -1280,9 +1280,11 @@ impl ReviewPane {
                                 .and_then(|l| l.unified.clone())
                                 .unwrap_or_else(|| Arc::new(Vec::new()))
                         },
-                        can_stage: !kind,
+                        can_stage: !kind
+                            && !monocode_core::jj::is_workspace(std::path::Path::new(cwd)),
                         can_discard: !kind,
                         can_stage_hunk: !kind
+                            && !monocode_core::jj::is_workspace(std::path::Path::new(cwd))
                             && !loaded.is_some_and(|l| l.diff.binary || l.diff.too_large),
                     }
                 })

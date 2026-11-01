@@ -22,6 +22,7 @@ use monocode_core::{
     scm::{self, ChangedFile, DiffIndex, Pr},
 };
 use serde::{Deserialize, Serialize};
+use std::path::Path;
 use std::{
     collections::HashSet,
     path::PathBuf,
@@ -622,14 +623,25 @@ impl Changes {
 
     fn pull(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let index = self.index(cx);
-        if !index.is_some_and(|i| i.remote.is_some() && i.upstream.is_some()) {
+        if !monocode_core::jj::is_workspace(Path::new(&self.cwd))
+            && !index.is_some_and(|i| i.remote.is_some() && i.upstream.is_some())
+        {
             return;
         }
         self.status = None;
         self.run_git(
             "pull".into(),
             |path| scm::pull(&path),
-            |this, _, cx| this.set_status("Pull complete", cx),
+            |this, _, cx| {
+                this.set_status(
+                    if monocode_core::jj::is_workspace(Path::new(&this.cwd)) {
+                        "Fetch complete"
+                    } else {
+                        "Pull complete"
+                    },
+                    cx,
+                )
+            },
             window,
             cx,
         );
@@ -720,7 +732,11 @@ impl Changes {
 
     fn can_commit(&self, cx: &App) -> bool {
         let index = self.git.read(cx).index.as_ref();
-        let staged = index.is_some_and(|i| i.files.iter().any(|f| f.staged));
+        let staged = index.is_some_and(|i| {
+            i.files.iter().any(|f| {
+                f.staged || (monocode_core::jj::is_workspace(Path::new(&self.cwd)) && f.unstaged)
+            })
+        });
         (staged || self.amend.is_some())
             && !self.message.read(cx).content.trim().is_empty()
             && self.busy.is_none()
@@ -890,15 +906,25 @@ impl Changes {
         let index = self.index(cx);
         let items: Vec<MenuItem> = match kind {
             MenuKind::Branch => {
-                let can_pull = index
-                    .as_ref()
-                    .is_some_and(|i| i.remote.is_some() && i.upstream.is_some());
+                let can_pull = monocode_core::jj::is_workspace(Path::new(&self.cwd))
+                    || index
+                        .as_ref()
+                        .is_some_and(|i| i.remote.is_some() && i.upstream.is_some());
                 let pulling = self.busy.as_deref() == Some("pull");
                 vec![
-                    MenuAction::new("pull", if pulling { "Pulling…" } else { "Pull" })
-                        .icon(if pulling { "loader" } else { "refresh-cw" })
-                        .disabled(self.busy.is_some() || !can_pull)
-                        .into(),
+                    MenuAction::new(
+                        "pull",
+                        if pulling {
+                            "Fetching…"
+                        } else if monocode_core::jj::is_workspace(Path::new(&self.cwd)) {
+                            "Fetch"
+                        } else {
+                            "Pull"
+                        },
+                    )
+                    .icon(if pulling { "loader" } else { "refresh-cw" })
+                    .disabled(self.busy.is_some() || !can_pull)
+                    .into(),
                 ]
             }
             MenuKind::Commit => {
@@ -911,9 +937,16 @@ impl Changes {
                         .disabled(!can_push_pr)
                         .into(),
                     MenuItem::Separator,
-                    MenuAction::new("amend", "Amend Last Commit")
-                        .checked(self.amend.is_some())
-                        .into(),
+                    MenuAction::new(
+                        "amend",
+                        if monocode_core::jj::is_workspace(Path::new(&self.cwd)) {
+                            "Describe Working Copy"
+                        } else {
+                            "Amend Last Commit"
+                        },
+                    )
+                    .checked(self.amend.is_some())
+                    .into(),
                 ]
             }
         };
@@ -952,7 +985,8 @@ impl Changes {
     }
     fn push_options(&self, cx: &App) -> (bool, bool) {
         let index = self.git.read(cx).index.as_ref();
-        let has_remote = index.is_some_and(|i| i.remote.is_some());
+        let has_remote = monocode_core::jj::is_workspace(Path::new(&self.cwd))
+            || index.is_some_and(|i| i.remote.is_some());
         let diverged = index.is_some_and(|i| i.ahead > 0 && i.behind > 0);
         let head_pushed = index.is_some_and(|i| i.head_pushed);
         let can_push = self.can_commit(cx)
@@ -960,7 +994,13 @@ impl Changes {
             && !diverged
             && (self.amend.is_none() || !head_pushed);
         let open_pr = self.pr.as_ref().is_some_and(|p| p.state == "open");
-        (can_push, can_push && !open_pr && !Self::on_default(index))
+        (
+            can_push,
+            can_push
+                && !monocode_core::jj::is_workspace(Path::new(&self.cwd))
+                && !open_pr
+                && !Self::on_default(index),
+        )
     }
 
     fn header(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -1222,6 +1262,43 @@ impl Changes {
     }
 
     fn sync_actions(&self, index: &DiffIndex, cx: &mut Context<Self>) -> AnyElement {
+        if monocode_core::jj::is_workspace(Path::new(&self.cwd)) {
+            return div()
+                .mt(px(6.))
+                .flex()
+                .gap_2()
+                .child(
+                    icon_action(
+                        "jj-fetch",
+                        "Fetch jj remotes",
+                        "refresh-cw",
+                        self.busy.is_none(),
+                    )
+                    .when(self.busy.is_none(), |d| {
+                        d.on_click(cx.listener(|this, _, window, cx| this.pull(window, cx)))
+                    }),
+                )
+                .child(
+                    icon_action(
+                        "jj-push",
+                        "Push jj bookmark",
+                        "cloud-upload",
+                        self.busy.is_none(),
+                    )
+                    .when(self.busy.is_none(), |d| {
+                        d.on_click(cx.listener(|this, _, window, cx| {
+                            this.run_git(
+                                "push".into(),
+                                |path| scm::push(&path),
+                                |this, _, cx| this.set_status("Push complete", cx),
+                                window,
+                                cx,
+                            )
+                        }))
+                    }),
+                )
+                .into_any_element();
+        }
         if index.remote.is_none() {
             return div().into_any_element();
         }
@@ -1409,6 +1486,7 @@ impl Changes {
         let index = self.git.read(cx).index.clone();
         let files = index.as_ref().map_or(&[][..], |i| &i.files[..]);
         let busy = self.busy.is_some();
+        let jj = monocode_core::jj::is_workspace(Path::new(&self.cwd));
         match self.lines[ix].clone() {
             Line::Section(kind) => {
                 let (title, open) = match kind {
@@ -1423,7 +1501,7 @@ impl Changes {
                     })
                     .count();
                 let tree = self.view == ChangesView::Tree;
-                let actions: Vec<(&'static str, &'static str, &'static str)> = match kind {
+                let mut actions: Vec<(&'static str, &'static str, &'static str)> = match kind {
                     Kind2::Staged => vec![
                         ("open-all-staged", "Open All Changes", "file-diff"),
                         ("unstage-all", "Unstage All Changes", "minus-sign"),
@@ -1434,6 +1512,9 @@ impl Changes {
                         ("stage-all", "Stage All Changes", "plus"),
                     ],
                 };
+                if jj {
+                    actions.retain(|(id, _, _)| !matches!(*id, "stage-all" | "unstage-all"));
+                }
                 div()
                     .h(px(ROW))
                     .w_full()
@@ -1619,9 +1700,10 @@ impl Changes {
                                         if stage { "Stage" } else { "Unstage" }
                                     ),
                                     if stage { "plus" } else { "minus-sign" },
-                                    !busy,
+                                    !busy && !jj,
                                 )
-                                .when(!busy, |d| {
+                                .when(jj, |d| d.hidden())
+                                .when(!busy && !jj, |d| {
                                     d.on_click(cx.listener(move |this, _, window, cx| {
                                         this.run_folder(folder.clone(), stage, window, cx)
                                     }))
@@ -1772,9 +1854,10 @@ impl Changes {
                                     } else {
                                         "plus"
                                     },
-                                    !busy,
+                                    !busy && !jj,
                                 )
-                                .when(!busy, |d| {
+                                .when(jj, |d| d.hidden())
+                                .when(!busy && !jj, |d| {
                                     d.on_click(cx.listener(move |this, _, window, cx| {
                                         let action = if kind == Kind2::Staged {
                                             FileAction::Unstage

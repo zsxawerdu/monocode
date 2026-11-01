@@ -106,6 +106,9 @@ pub struct Settings {
     #[serde(skip)]
     pub disable_claude_hooks: bool,
     #[serde(skip)]
+    pub pi_codemode: bool,
+    pub shared_codemode: bool,
+    #[serde(skip)]
     pub environment: std::collections::HashMap<String, String>,
     #[serde(skip)]
     pub mono: Option<MonoContext>,

@@ -113,7 +113,7 @@ impl Protocol {
     /// The native visual tools, plus a Mono's app tool.
     fn mcp_servers(&self) -> Value {
         let settings = &self.request.settings;
-        let mut servers = crate::visual_bridge::acp_servers(&settings.environment);
+        let mut servers = crate::codemode::acp_servers(&self.request);
         if let (Some(list), Some(app)) = (
             servers.as_array_mut(),
             crate::mono::bridge::acp_server(settings.mono.as_ref(), &settings.environment),

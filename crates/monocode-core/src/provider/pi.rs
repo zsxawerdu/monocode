@@ -44,6 +44,15 @@ pub(super) fn configure(command: &mut Command, request: &Request, probe: bool) {
             },
         ]);
     }
+    if request.kind == Kind::Pi
+        && request.settings.pi_codemode
+        && !probe
+        && !request.settings.text_only
+        && !request.settings.plan
+        && request.settings.access != AccessMode::ReadOnly
+    {
+        command.args(["--tools", "+codemode"]);
+    }
     if let Some(id) = &request.provider_id {
         command.args([
             if request.kind == Kind::Omp {
@@ -568,7 +577,13 @@ impl Protocol {
                     {
                         previous.extend(next.clone());
                     }
-                    tool.input = serde_json::to_string_pretty(&previous).unwrap_or_default();
+                    tool.input = if let Some(script) = input.as_str() {
+                        script.to_owned()
+                    } else if input.is_object() {
+                        serde_json::to_string_pretty(&previous).unwrap_or_default()
+                    } else {
+                        serde_json::to_string_pretty(&input).unwrap_or_default()
+                    };
                 }
                 let output = acp::content_text(
                     &v[if kind == "tool_execution_end" {
@@ -770,6 +785,23 @@ mod tests {
             model: None,
             settings: Default::default(),
         })
+    }
+    #[test]
+    fn codemode_keeps_raw_script_and_respects_read_only() {
+        let mut p = protocol(Kind::Pi);
+        let mut out = Vec::new();
+        let script = "const results = await Promise.all([]); text(results);";
+        p.frame(json!({"type":"tool_execution_start","toolCallId":"code","toolName":"codemode","args":script}), &mut out).unwrap();
+        p.frame(json!({"type":"tool_execution_end","toolCallId":"code","result":{"content":[{"text":"done"}]}}), &mut out).unwrap();
+        assert_eq!(p.tools["code"].input, script);
+        p.request.settings.pi_codemode = true;
+        let mut cmd = Command::new("pi");
+        configure(&mut cmd, &p.request, false);
+        assert!(cmd.get_args().any(|a| a == "+codemode"));
+        p.request.settings.access = AccessMode::ReadOnly;
+        let mut cmd = Command::new("pi");
+        configure(&mut cmd, &p.request, false);
+        assert!(!cmd.get_args().any(|a| a == "+codemode"));
     }
     #[test]
     fn prompt_acknowledgements_do_not_finish_a_turn_and_retries_are_kept_alive() {

@@ -78,6 +78,8 @@ pub(crate) struct Preferences {
     pub mask_emails: bool,
     pub idle_agents: u32,
     pub claude_hooks: bool,
+    pub pi_codemode: bool,
+    pub shared_codemode: bool,
     /// Experimental: report Monocode instead of `sdk-cli` as Claude's entrypoint.
     pub claude_entrypoint: bool,
     pub binary_paths: HashMap<String, String>,
@@ -167,6 +169,8 @@ impl Default for Preferences {
             mask_emails: true,
             idle_agents: 3,
             claude_hooks: true,
+            pi_codemode: false,
+            shared_codemode: true,
             claude_entrypoint: false,
             binary_paths: HashMap::new(),
             disabled_skill_paths: Vec::new(),
